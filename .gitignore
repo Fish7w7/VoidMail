@@ -1,0 +1,20 @@
+# Auth
+backend/credentials.json
+backend/token.pickle
+
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+*.pyo
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/.env
+frontend/.env.local
+
+# OS
+.DS_Store
+Thumbs.db
