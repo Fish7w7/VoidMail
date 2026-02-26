@@ -1,6 +1,6 @@
 import re
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 PROMO_KEYWORDS = [
     "unsubscribe", "promoção", "oferta", "desconto", "sale", "deal",
@@ -80,7 +80,11 @@ def calculate_health_score(senders_data: List[Dict]) -> int:
     return max(0, min(100, health))
 
 
-def aggregate_senders(messages: List[Dict]) -> List[Dict]:
+# Fix 1: replied_to agora é passado e usado corretamente
+def aggregate_senders(
+    messages: List[Dict],
+    replied_to: Optional[set] = None,
+) -> List[Dict]:
     sender_map: Dict[str, Dict] = defaultdict(lambda: {
         "count": 0,
         "promo_count": 0,
@@ -110,7 +114,14 @@ def aggregate_senders(messages: List[Dict]) -> List[Dict]:
     for email, data in sender_map.items():
         count = data["count"]
         promo_ratio = data["promo_count"] / count if count > 0 else 0
-        score = calculate_score(count, promo_ratio, True)
+
+        # Fix 1: usa replied_to real — se não temos dados, assume False (sem penalidade)
+        if replied_to is not None:
+            never_replied = email not in replied_to
+        else:
+            never_replied = False
+
+        score = calculate_score(count, promo_ratio, never_replied)
         percentage = round((count / total_emails) * 100, 1) if total_emails > 0 else 0
 
         result.append({
@@ -121,6 +132,7 @@ def aggregate_senders(messages: List[Dict]) -> List[Dict]:
             "promo_ratio": round(promo_ratio, 2),
             "score": score,
             "percentage": percentage,
+            "never_replied": never_replied,
         })
 
     result.sort(key=lambda x: x["count"], reverse=True)

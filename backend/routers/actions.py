@@ -24,6 +24,12 @@ def require_auth():
     return gmail_client.get_service()
 
 
+# Import lazy para evitar circular import
+def _invalidate_stats_cache():
+    from routers.emails import _invalidate_cache
+    _invalidate_cache()
+
+
 def create_filter(service, sender_email: str):
     filter_body = {
         "criteria": {"from": sender_email},
@@ -73,6 +79,7 @@ async def block_sender(req: BlockRequest):
     service = require_auth()
     try:
         result = create_filter(service, req.email)
+        _invalidate_stats_cache()
         return {"success": True, "filter_id": result.get("id"), "email": req.email}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -83,6 +90,7 @@ async def delete_sender(req: DeleteRequest):
     service = require_auth()
     try:
         deleted = delete_all_from_sender(service, req.email)
+        _invalidate_stats_cache()
         return {"success": True, "deleted": deleted, "email": req.email}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -94,12 +102,30 @@ async def block_and_delete(req: BlockRequest):
     try:
         filter_result = create_filter(service, req.email)
         deleted = delete_all_from_sender(service, req.email)
+        _invalidate_stats_cache()
         return {
             "success": True,
             "filter_id": filter_result.get("id"),
             "deleted": deleted,
             "email": req.email,
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class UnblockRequest(BaseModel):
+    filter_id: str
+
+@router.post("/unblock")
+async def unblock_sender(req: UnblockRequest):
+    """Remove um filtro do Gmail — usado pelo Undo após bloquear."""
+    service = require_auth()
+    try:
+        service.users().settings().filters().delete(
+            userId="me", id=req.filter_id
+        ).execute()
+        _invalidate_stats_cache()
+        return {"success": True, "filter_id": req.filter_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -117,4 +143,5 @@ async def auto_clean(req: BulkActionRequest):
         except Exception as e:
             results.append({"email": email, "success": False, "error": str(e)})
 
+    _invalidate_stats_cache()
     return {"results": results}

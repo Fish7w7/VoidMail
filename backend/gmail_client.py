@@ -1,4 +1,3 @@
-import os
 import json
 import pickle
 from pathlib import Path
@@ -6,15 +5,30 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 
 SCOPES = [
     "https://mail.google.com/",
     "https://www.googleapis.com/auth/gmail.settings.basic",
 ]
 
-TOKEN_PATH = Path("token.pickle")
+TOKEN_JSON       = Path("token.json")
+TOKEN_PICKLE     = Path("token.pickle")
 CREDENTIALS_PATH = Path("credentials.json")
+
+
+def _migrate_pickle_to_json():
+    """Migra token.pickle → token.json automaticamente se necessário."""
+    if TOKEN_PICKLE.exists() and not TOKEN_JSON.exists():
+        try:
+            with open(TOKEN_PICKLE, "rb") as f:
+                creds = pickle.load(f)
+            with open(TOKEN_JSON, "w") as f:
+                f.write(creds.to_json())
+            TOKEN_PICKLE.unlink()
+            print("✓ token.pickle migrado para token.json")
+        except Exception as e:
+            print(f"⚠ Falha ao migrar token.pickle: {e}")
+            TOKEN_PICKLE.unlink(missing_ok=True)
 
 
 class GmailClient:
@@ -22,17 +36,32 @@ class GmailClient:
         self.service = None
         self.creds = None
 
+    def _save_creds(self):
+        if self.creds:
+            with open(TOKEN_JSON, "w") as f:
+                f.write(self.creds.to_json())
+
     def is_authenticated(self) -> bool:
-        if TOKEN_PATH.exists():
-            with open(TOKEN_PATH, "rb") as f:
-                self.creds = pickle.load(f)
+        _migrate_pickle_to_json()
+
+        if not TOKEN_JSON.exists():
+            return False
+
+        try:
+            with open(TOKEN_JSON, "r") as f:
+                data = json.load(f)
+            self.creds = Credentials.from_authorized_user_info(data, SCOPES)
+        except Exception:
+            TOKEN_JSON.unlink(missing_ok=True)
+            self.creds = None
+            return False
+
         return self.creds is not None and self.creds.valid
 
     def refresh_if_needed(self):
         if self.creds and self.creds.expired and self.creds.refresh_token:
             self.creds.refresh(Request())
-            with open(TOKEN_PATH, "wb") as f:
-                pickle.dump(self.creds, f)
+            self._save_creds()
 
     def get_auth_url(self) -> str:
         if not CREDENTIALS_PATH.exists():
@@ -47,8 +76,7 @@ class GmailClient:
         flow.redirect_uri = "http://localhost:8000/auth/callback"
         flow.fetch_token(code=code)
         self.creds = flow.credentials
-        with open(TOKEN_PATH, "wb") as f:
-            pickle.dump(self.creds, f)
+        self._save_creds()
 
     def get_service(self):
         if not self.creds:
@@ -59,8 +87,8 @@ class GmailClient:
         return self.service
 
     def revoke(self):
-        if TOKEN_PATH.exists():
-            TOKEN_PATH.unlink()
+        TOKEN_JSON.unlink(missing_ok=True)
+        TOKEN_PICKLE.unlink(missing_ok=True)
         self.creds = None
         self.service = None
 
