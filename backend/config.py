@@ -21,6 +21,10 @@ class Settings:
         "yes",
         "on",
     }
+    action_history_path: Path = BASE_DIR / os.getenv(
+        "VOIDMAIL_ACTION_HISTORY_FILE",
+        "action-history.jsonl",
+    )
 
     @property
     def oauth_redirect_uri(self) -> str:

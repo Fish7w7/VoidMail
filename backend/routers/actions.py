@@ -2,9 +2,11 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query
 
+from action_history import append_action_history, append_result_history, read_action_history
 from config import settings
 from gmail_client import gmail_client
 from schemas import (
+    ActionHistoryEntry,
     ActionPreview,
     ActionResult,
     BulkActionRequest,
@@ -123,13 +125,15 @@ def _run_action(
 ) -> ActionResult:
     if dry_run:
         preview = _build_preview(service, email, action, dry_run=True)
-        return ActionResult(
+        result = ActionResult(
             success=True,
             email=email,
             dry_run=True,
             deleted=preview.matching_emails if preview.will_delete else 0,
             message="Dry run: no Gmail changes were made.",
         )
+        append_result_history(action, result)
+        return result
 
     filter_id = None
     deleted = 0
@@ -142,13 +146,21 @@ def _run_action(
         deleted = delete_all_from_sender(service, email)
 
     _invalidate_stats_cache()
-    return ActionResult(
+    result = ActionResult(
         success=True,
         email=email,
         dry_run=False,
         filter_id=filter_id,
         deleted=deleted,
     )
+    append_result_history(action, result)
+    return result
+
+
+@router.get("/history", response_model=list[ActionHistoryEntry])
+async def get_action_history(limit: int = Query(default=50, ge=1, le=200)):
+    require_auth()
+    return read_action_history(limit)
 
 
 @router.get("/preview", response_model=ActionPreview)
@@ -202,6 +214,12 @@ async def unblock_sender(req: UnblockRequest):
             userId="me", id=req.filter_id
         ).execute()
         _invalidate_stats_cache()
+        append_action_history(
+            email="",
+            action="unblock",
+            success=True,
+            filter_id=req.filter_id,
+        )
         return {"success": True, "filter_id": req.filter_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -217,13 +235,13 @@ async def auto_clean(req: BulkActionRequest):
         try:
             results.append(_run_action(service, email, "both", dry_run))
         except Exception as e:
-            results.append(
-                ActionResult(
-                    success=False,
-                    email=email,
-                    dry_run=dry_run,
-                    message=str(e),
-                )
+            result = ActionResult(
+                success=False,
+                email=email,
+                dry_run=dry_run,
+                message=str(e),
             )
+            append_result_history("both", result)
+            results.append(result)
 
     return {"results": [result.model_dump() for result in results]}

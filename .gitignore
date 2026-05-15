@@ -2,6 +2,7 @@
 backend/credentials.json
 backend/token.json
 backend/token.pickle
+backend/action-history.jsonl
 
 # Python
 __pycache__/

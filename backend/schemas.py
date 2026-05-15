@@ -58,3 +58,14 @@ class ActionResult(BaseModel):
 
 class BulkActionResult(BaseModel):
     results: list[ActionResult]
+
+
+class ActionHistoryEntry(BaseModel):
+    timestamp: str
+    email: str
+    action: Literal["block", "delete", "both", "unblock", "auto-clean"]
+    success: bool
+    dry_run: bool = False
+    deleted: int = 0
+    filter_id: str | None = None
+    message: str | None = None

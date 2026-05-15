@@ -107,6 +107,17 @@ export interface ActionResult {
   message?: string | null;
 }
 
+export interface ActionHistoryEntry {
+  timestamp: string;
+  email: string;
+  action: ActionKind | "unblock" | "auto-clean";
+  success: boolean;
+  dry_run: boolean;
+  deleted: number;
+  filter_id?: string | null;
+  message?: string | null;
+}
+
 export const previewAction = (email: string, action: ActionKind, dryRun?: boolean) => {
   const params = new URLSearchParams({ email, action });
   if (dryRun !== undefined) params.set("dry_run", String(dryRun));
@@ -118,3 +129,4 @@ export const deleteSender   = (email: string, dryRun?: boolean) => api.post<Acti
 export const blockAndDelete = (email: string, dryRun?: boolean) => api.post<ActionResult>("/actions/block-and-delete", { email, dry_run: dryRun });
 export const autoClean      = (emails: string[], dryRun?: boolean) => api.post<{ results: ActionResult[] }>("/actions/auto-clean", { emails, dry_run: dryRun });
 export const unblockSender  = (filterId: string) => api.post("/actions/unblock", { filter_id: filterId });
+export const getActionHistory = (limit = 20) => api.get<ActionHistoryEntry[]>(`/actions/history?limit=${limit}`);

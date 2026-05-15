@@ -1,14 +1,29 @@
 "use client";
 import { useState, useMemo } from "react";
-import { Sender, autoClean, blockSender, deleteSender } from "@/lib/api";
+import { Sender, autoClean, blockSender, deleteSender, getActionHistory, ActionHistoryEntry } from "@/lib/api";
 import SenderRow from "./SenderRow";
 import { useToast } from "@/contexts/ToastContext";
 
 // ─── Domain grouping ──────────────────────────────────────────────────────────
 
+const COMPOUND_PUBLIC_SUFFIXES = new Set([
+  "com.br", "net.br", "org.br", "gov.br", "edu.br",
+  "co.uk", "org.uk", "ac.uk",
+  "com.au", "net.au", "org.au",
+  "co.jp", "co.in", "com.mx",
+]);
+
 function getRootDomain(domain: string): string {
-  const parts = domain.split(".");
-  return parts.length <= 2 ? domain : parts.slice(-2).join(".");
+  const normalized = domain.toLowerCase().replace(/\.$/, "");
+  const parts = normalized.split(".").filter(Boolean);
+  if (parts.length <= 2) return normalized;
+
+  const suffix2 = parts.slice(-2).join(".");
+  if (COMPOUND_PUBLIC_SUFFIXES.has(suffix2) && parts.length >= 3) {
+    return parts.slice(-3).join(".");
+  }
+
+  return parts.slice(-2).join(".");
 }
 
 interface GroupedSender {
@@ -140,6 +155,94 @@ function DomainGroupRow({ group, onBlockAll, onDeleteAll }: {
   );
 }
 
+function CleanupReviewPanel({
+  senders,
+  selected,
+  processing,
+  onToggle,
+  onCancel,
+  onConfirm,
+}: {
+  senders: Sender[];
+  selected: Set<string>;
+  processing: boolean;
+  onToggle: (email: string) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const selectedCount = selected.size;
+  const selectedEmails = senders.filter((s) => selected.has(s.email));
+  const estimatedEmails = selectedEmails.reduce((sum, s) => sum + s.count, 0);
+
+  return (
+    <div style={{ border: "1px solid rgba(239,68,68,0.18)", background: "rgba(239,68,68,0.05)", borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(239,68,68,0.12)", display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center" }}>
+        <div>
+          <p style={{ color: "#ef4444", fontSize: 12, fontFamily: "'Geist Mono'", marginBottom: 4 }}>REVISAO DE LIMPEZA</p>
+          <p style={{ color: "#e2e2e8", fontSize: 15, fontWeight: 600 }}>
+            {selectedCount} remetente(s) selecionado(s) · {estimatedEmails.toLocaleString("pt-BR")} emails estimados
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onCancel} disabled={processing} style={{ padding: "7px 14px", borderRadius: 7, border: "1px solid #2a2a35", background: "transparent", color: "#8b8bab", cursor: "pointer", fontSize: 12 }}>
+            Cancelar
+          </button>
+          <button onClick={onConfirm} disabled={processing || selectedCount === 0} style={{ padding: "7px 14px", borderRadius: 7, border: "none", background: selectedCount === 0 ? "#2a2a35" : "#ef4444", color: "#fff", cursor: selectedCount === 0 ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600 }}>
+            {processing ? "Processando..." : "Bloquear + limpar"}
+          </button>
+        </div>
+      </div>
+      <div style={{ maxHeight: 260, overflowY: "auto" }}>
+        {senders.map((sender) => (
+          <label key={sender.email} style={{ display: "grid", gridTemplateColumns: "24px 1fr auto", gap: 10, alignItems: "center", padding: "10px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={selected.has(sender.email)}
+              onChange={() => onToggle(sender.email)}
+              style={{ accentColor: "#ef4444" }}
+            />
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: "block", color: "#e2e2e8", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sender.name}</span>
+              <span style={{ display: "block", color: "#525264", fontSize: 11, fontFamily: "'Geist Mono'", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sender.email}</span>
+            </span>
+            <span style={{ color: "#ef4444", fontSize: 11, fontFamily: "'Geist Mono'" }}>{sender.count} · score {sender.score}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ActionHistoryPanel({ entries, onClose }: { entries: ActionHistoryEntry[]; onClose: () => void }) {
+  return (
+    <div style={{ border: "1px solid rgba(91,103,248,0.16)", background: "rgba(91,103,248,0.05)", borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(91,103,248,0.12)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <p style={{ color: "#5b67f8", fontSize: 12, fontFamily: "'Geist Mono'", marginBottom: 4 }}>HISTORICO LOCAL</p>
+          <p style={{ color: "#e2e2e8", fontSize: 14, fontWeight: 600 }}>{entries.length} acao(oes) recentes</p>
+        </div>
+        <button onClick={onClose} style={{ width: 28, height: 28, borderRadius: 7, border: "1px solid #2a2a35", background: "transparent", color: "#8b8bab", cursor: "pointer" }}>
+          x
+        </button>
+      </div>
+      <div style={{ maxHeight: 220, overflowY: "auto" }}>
+        {entries.length === 0 ? (
+          <p style={{ padding: 20, color: "#525264", fontSize: 12, fontFamily: "'Geist Mono'" }}>Nenhuma acao registrada ainda.</p>
+        ) : entries.map((entry, index) => (
+          <div key={`${entry.timestamp}-${index}`} style={{ display: "grid", gridTemplateColumns: "150px 90px 1fr auto", gap: 10, padding: "9px 20px", borderBottom: "1px solid rgba(255,255,255,0.04)", alignItems: "center" }}>
+            <span style={{ color: "#525264", fontSize: 11, fontFamily: "'Geist Mono'" }}>{new Date(entry.timestamp).toLocaleString("pt-BR")}</span>
+            <span style={{ color: entry.success ? "#22c55e" : "#ef4444", fontSize: 11, fontFamily: "'Geist Mono'" }}>{entry.action}</span>
+            <span style={{ color: "#c2c2cc", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{entry.email || entry.filter_id || "-"}</span>
+            <span style={{ color: "#6b6b80", fontSize: 11, fontFamily: "'Geist Mono'" }}>
+              {entry.dry_run ? "simulado" : `${entry.deleted} removidos`}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -167,7 +270,10 @@ export default function SendersTable({
   const [search,           setSearch]          = useState("");
   const [groupDomainMode,  setGroupDomainMode] = useState(false);
   const [autoCleaning,     setAutoCleaning]    = useState(false);
-  const [confirmClean,     setConfirmClean]    = useState(false);
+  const [reviewOpen,       setReviewOpen]      = useState(false);
+  const [cleanupSelection, setCleanupSelection]= useState<Set<string>>(new Set());
+  const [historyOpen,      setHistoryOpen]     = useState(false);
+  const [historyEntries,   setHistoryEntries]  = useState<ActionHistoryEntry[]>([]);
   const [completedActions, setCompletedActions]= useState<Record<string, string[]>>({});
   const [removedEmails,    setRemovedEmails]   = useState<Set<string>>(new Set());
   const [sessionDeleted,   setSessionDeleted]  = useState(0);
@@ -193,8 +299,9 @@ export default function SendersTable({
     return result;
   }, [visibleSenders, filter, search]);
 
-  const grouped     = useMemo(() => groupByDomain(filtered), [filtered]);
-  const toxicEmails = visibleSenders.filter((s) => s.score >= 80).map((s) => s.email);
+  const grouped      = useMemo(() => groupByDomain(filtered), [filtered]);
+  const toxicSenders = useMemo(() => visibleSenders.filter((s) => s.score >= 80), [visibleSenders]);
+  const toxicEmails  = toxicSenders.map((s) => s.email);
 
   const handleAction = (email: string, action: string, deletedCount?: number) => {
     setCompletedActions((prev) => ({
@@ -209,11 +316,26 @@ export default function SendersTable({
     setRemovedEmails((prev) => new Set(Array.from(prev).concat(email)));
   };
 
+  const openCleanupReview = () => {
+    setCleanupSelection(new Set(toxicEmails));
+    setReviewOpen(true);
+  };
+
+  const toggleCleanupSelection = (email: string) => {
+    setCleanupSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email);
+      else next.add(email);
+      return next;
+    });
+  };
+
   const handleAutoClean = async () => {
-    if (!confirmClean) { setConfirmClean(true); return; }
+    const targetEmails = Array.from(cleanupSelection);
+    if (targetEmails.length === 0) return;
     setAutoCleaning(true);
     try {
-      const res = await autoClean(toxicEmails);
+      const res = await autoClean(targetEmails);
       const wasDryRun = res.data.results.some((r) => r.dry_run);
       if (wasDryRun) {
         const total = res.data.results.reduce((sum, r) => sum + (r.deleted ?? 0), 0);
@@ -221,16 +343,16 @@ export default function SendersTable({
         return;
       }
       const next: Record<string, string[]> = {};
-      toxicEmails.forEach((e) => (next[e] = ["both"]));
+      targetEmails.forEach((e) => (next[e] = ["both"]));
       setCompletedActions((prev) => ({ ...prev, ...next }));
-      setSessionBlocked((n) => n + toxicEmails.length);
+      setSessionBlocked((n) => n + targetEmails.length);
       setSessionDeleted((n) => n + res.data.results.reduce((sum, r) => sum + (r.deleted ?? 0), 0));
-      addToast(`Limpeza automática: ${toxicEmails.length} remetentes processados`);
+      addToast(`Limpeza automatica: ${targetEmails.length} remetentes processados`);
+      setReviewOpen(false);
     } catch (e: any) {
-      addToast(e?.response?.data?.detail ?? "Erro na limpeza automática.", "error");
+      addToast(e?.response?.data?.detail ?? "Erro na limpeza automatica.", "error");
     } finally {
       setAutoCleaning(false);
-      setConfirmClean(false);
     }
   };
 
@@ -266,6 +388,16 @@ export default function SendersTable({
       );
     } catch (e: any) {
       addToast(e?.response?.data?.detail ?? "Erro ao limpar grupo.", "error");
+    }
+  };
+
+  const handleOpenHistory = async () => {
+    try {
+      const res = await getActionHistory(20);
+      setHistoryEntries(res.data);
+      setHistoryOpen(true);
+    } catch (e: any) {
+      addToast(e?.response?.data?.detail ?? "Erro ao carregar historico.", "error");
     }
   };
 
@@ -312,6 +444,24 @@ export default function SendersTable({
             inbox tinha {initialTotal.toLocaleString("pt-BR")} emails
           </span>
         </div>
+      )}
+
+      {reviewOpen && (
+        <CleanupReviewPanel
+          senders={toxicSenders}
+          selected={cleanupSelection}
+          processing={autoCleaning}
+          onToggle={toggleCleanupSelection}
+          onCancel={() => !autoCleaning && setReviewOpen(false)}
+          onConfirm={handleAutoClean}
+        />
+      )}
+
+      {historyOpen && (
+        <ActionHistoryPanel
+          entries={historyEntries}
+          onClose={() => setHistoryOpen(false)}
+        />
       )}
 
       <div style={{ background: "#111114", border: "1px solid #1c1c22", borderRadius: 10, overflow: "hidden" }}>
@@ -372,15 +522,26 @@ export default function SendersTable({
               ⊞ Domínio
             </button>
 
-            {/* Limpeza automática */}
+            <button
+              onClick={() => void handleOpenHistory()}
+              style={{
+                padding: "5px 14px", fontSize: 12, fontFamily: "'Geist'", fontWeight: 500,
+                border: "1px solid #1c1c22", background: "transparent",
+                color: "#525264", borderRadius: 8, cursor: "pointer",
+              }}
+            >
+              Historico
+            </button>
+
+            {/* Limpeza automatica */}
             {toxicEmails.length > 0 && (
-              <button onClick={handleAutoClean} disabled={autoCleaning} style={{
+              <button onClick={openCleanupReview} disabled={autoCleaning} style={{
                 padding: "6px 14px", fontSize: 12, fontFamily: "'Geist'", fontWeight: 500,
-                border: `1px solid ${confirmClean ? "rgba(239,68,68,0.4)" : "rgba(239,68,68,0.15)"}`,
-                background: confirmClean ? "rgba(239,68,68,0.1)" : "transparent",
+                border: "1px solid rgba(239,68,68,0.15)",
+                background: "transparent",
                 color: "#ef4444", borderRadius: 8, cursor: "pointer",
               }}>
-                {autoCleaning ? "Limpando…" : confirmClean ? `⚠ Confirmar (${toxicEmails.length})` : "Limpeza automática"}
+                {autoCleaning ? "Limpando..." : `Revisar limpeza (${toxicEmails.length})`}
               </button>
             )}
           </div>
