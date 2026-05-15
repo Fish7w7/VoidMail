@@ -1,9 +1,9 @@
-# ─── Credenciais e tokens 
+# Credentials and tokens
 backend/credentials.json
 backend/token.json
 backend/token.pickle
 
-# ─── Python 
+# Python
 __pycache__/
 *.py[cod]
 *.pyo
@@ -20,7 +20,7 @@ build/
 .mypy_cache/
 .ruff_cache/
 
-# ─── Next.js / Node 
+# Next.js / Node
 frontend/node_modules/
 frontend/.next/
 frontend/out/
@@ -32,13 +32,14 @@ frontend/.env.production.local
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
+*.tsbuildinfo
 
-# ─── OS 
+# OS
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# ─── IDEs 
+# IDEs
 .vscode/
 .idea/
 *.swp

@@ -9,6 +9,7 @@ from typing import Optional, Tuple
 from fastapi import APIRouter, HTTPException, Query
 from gmail_client import gmail_client
 from analyzer import aggregate_senders, calculate_health_score
+from schemas import normalize_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -536,8 +537,11 @@ async def get_sender_messages(
 ):
     require_auth()
     try:
-        result = await asyncio.to_thread(fetch_sender_messages, email, limit)
-        return {"email": email, "messages": result}
+        sender_email = normalize_email(email)
+        result = await asyncio.to_thread(fetch_sender_messages, sender_email, limit)
+        return {"email": sender_email, "messages": result}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.exception("Erro ao buscar mensagens do remetente")
         raise HTTPException(status_code=500, detail=str(e))

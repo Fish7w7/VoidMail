@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 from gmail_client import gmail_client
+from schemas import normalize_email
 
 router = APIRouter()
 
@@ -18,13 +19,16 @@ async def get_sender_messages(
     service = require_auth()
 
     try:
+        sender_email = normalize_email(email)
         response = service.users().messages().list(
             userId="me",
-            q=f"from:{email}",
+            q=f"from:{sender_email}",
             maxResults=limit,
         ).execute()
 
         messages = response.get("messages", [])
-        return {"email": email, "count": len(messages), "message_ids": [m["id"] for m in messages]}
+        return {"email": sender_email, "count": len(messages), "message_ids": [m["id"] for m in messages]}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

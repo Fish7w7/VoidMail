@@ -1,10 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 
 from routers import auth, emails, senders, actions
-from gmail_client import GmailClient
+from config import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -14,7 +14,7 @@ app = FastAPI(title="VoidMail API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[settings.frontend_url],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,4 +30,4 @@ async def health():
     return {"status": "ok"}
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("main:app", host=settings.host, port=settings.port, reload=False)

@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Sender, blockSender, deleteSender, blockAndDelete, unblockSender } from "@/lib/api";
+import { Sender, blockSender, deleteSender, blockAndDelete, unblockSender, previewAction, ActionPreview } from "@/lib/api";
 import { useToast } from "@/contexts/ToastContext";
 import SenderPreview from "./SenderPreview";
 
@@ -43,11 +43,22 @@ function ConfirmModal({ sender, action, onConfirm, onCancel, loading }: {
   onConfirm: () => void; onCancel: () => void; loading: boolean;
 }) {
   const a = ACTIONS[action];
+  const [preview, setPreview] = useState<ActionPreview | null>(null);
+  const [previewError, setPreviewError] = useState("");
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === "Escape" && !loading) onCancel(); };
     document.addEventListener("keydown", h);
     return () => document.removeEventListener("keydown", h);
   }, [loading, onCancel]);
+
+  useEffect(() => {
+    setPreview(null);
+    setPreviewError("");
+    previewAction(sender.email, action)
+      .then((r) => setPreview(r.data))
+      .catch((e) => setPreviewError(e?.response?.data?.detail ?? "Nao foi possivel carregar a previa."));
+  }, [action, sender.email]);
 
   return createPortal(
     <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.65)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -57,7 +68,23 @@ function ConfirmModal({ sender, action, onConfirm, onCancel, loading }: {
         <style>{`@keyframes modalIn{from{opacity:0;transform:scale(0.97)}to{opacity:1;transform:scale(1)}}`}</style>
         <p style={{ color: "#e2e2e8", fontSize: 15, fontWeight: 600, marginBottom: 8, letterSpacing: "-0.02em" }}>{a.label}</p>
         <p style={{ color: "#525264", fontSize: 13, lineHeight: 1.6, marginBottom: 6 }}>{a.confirm}</p>
-        <p style={{ color: "#2a2a35", fontSize: 12, fontFamily: "'Geist Mono'", marginBottom: 24 }}>{sender.email}</p>
+        <p style={{ color: "#2a2a35", fontSize: 12, fontFamily: "'Geist Mono'", marginBottom: 16 }}>{sender.email}</p>
+        <div style={{ padding: "12px 14px", border: "1px solid #1c1c22", borderRadius: 8, background: "#0d0d0f", marginBottom: 18 }}>
+          {preview ? (
+            <>
+              <p style={{ color: "#c2c2cc", fontSize: 12, lineHeight: 1.5 }}>
+                {preview.matching_emails.toLocaleString("pt-BR")} emails encontrados para este remetente.
+              </p>
+              <p style={{ color: preview.dry_run ? "#f59e0b" : "#525264", fontSize: 11, fontFamily: "'Geist Mono'", marginTop: 6 }}>
+                {preview.dry_run ? "Modo simulacao ativo: nada sera alterado no Gmail." : "Acao real: confira antes de confirmar."}
+              </p>
+            </>
+          ) : (
+            <p style={{ color: previewError ? "#ef4444" : "#525264", fontSize: 11, fontFamily: "'Geist Mono'" }}>
+              {previewError || "Calculando previa..."}
+            </p>
+          )}
+        </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={onCancel} disabled={loading}
             style={{ padding: "7px 16px", fontSize: 12, fontFamily: "'Geist'", fontWeight: 500, background: "transparent", border: "1px solid #2a2a35", borderRadius: 7, color: "#525264", cursor: "pointer" }}>
@@ -65,7 +92,7 @@ function ConfirmModal({ sender, action, onConfirm, onCancel, loading }: {
           </button>
           <button onClick={onConfirm} disabled={loading}
             style={{ padding: "7px 16px", fontSize: 12, fontFamily: "'Geist'", fontWeight: 500, background: a.color, border: "none", borderRadius: 7, color: "#fff", cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.6 : 1 }}>
-            {loading ? "Executando…" : "Confirmar"}
+            {loading ? "Executando..." : preview?.dry_run ? "Simular" : "Confirmar"}
           </button>
         </div>
       </div>
@@ -105,11 +132,15 @@ export default function SenderRow({ sender, completedActions, onAction, onRemove
     setLoading(true);
     try {
       let deletedCount: number | undefined;
-      let filterId: string | undefined;
+      let filterId: string | null | undefined;
 
       if (pending === "block") {
         const res = await blockSender(sender.email);
         filterId = res.data?.filter_id;
+        if (res.data?.dry_run) {
+          addToast(`Simulacao: ${sender.name} seria bloqueado`, "info");
+          return;
+        }
 
         // Feature 11: toast com botão Desfazer após bloquear
         addToast(
@@ -130,11 +161,19 @@ export default function SenderRow({ sender, completedActions, onAction, onRemove
       } else if (pending === "delete") {
         const res = await deleteSender(sender.email);
         deletedCount = res.data?.deleted;
+        if (res.data?.dry_run) {
+          addToast(`Simulacao: ${deletedCount ?? 0} emails seriam removidos`, "info");
+          return;
+        }
         addToast(`${deletedCount ?? 0} emails de ${sender.name} removidos`);
       } else {
         const res = await blockAndDelete(sender.email);
         deletedCount = res.data?.deleted;
         filterId     = res.data?.filter_id;
+        if (res.data?.dry_run) {
+          addToast(`Simulacao: ${sender.name} seria bloqueado e ${deletedCount ?? 0} emails seriam removidos`, "info");
+          return;
+        }
         addToast(`${sender.name} bloqueado · ${deletedCount ?? 0} emails removidos`);
       }
 

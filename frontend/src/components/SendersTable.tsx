@@ -1,6 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
-import { Sender, autoClean } from "@/lib/api";
+import { Sender, autoClean, blockSender, deleteSender } from "@/lib/api";
 import SenderRow from "./SenderRow";
 import { useToast } from "@/contexts/ToastContext";
 
@@ -54,8 +54,8 @@ function Score({ s }: { s: number }) {
 
 function DomainGroupRow({ group, onBlockAll, onDeleteAll }: {
   group:       GroupedSender;
-  onBlockAll:  (emails: string[]) => void;
-  onDeleteAll: (emails: string[]) => void;
+  onBlockAll:  (emails: string[]) => Promise<void>;
+  onDeleteAll: (emails: string[]) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const emails = group.addresses.map((a) => a.email);
@@ -94,8 +94,8 @@ function DomainGroupRow({ group, onBlockAll, onDeleteAll }: {
         <td style={{ padding: "13px 16px" }} onClick={(e) => e.stopPropagation()}>
           <div style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
             {[
-              { label: "Bloquear todos", color: "#f59e0b", fn: () => onBlockAll(emails)  },
-              { label: "Limpar todos",   color: "#ef4444", fn: () => onDeleteAll(emails) },
+              { label: "Bloquear todos", color: "#f59e0b", fn: () => void onBlockAll(emails)  },
+              { label: "Limpar todos",   color: "#ef4444", fn: () => void onDeleteAll(emails) },
             ].map(({ label, color, fn }) => (
               <button key={label} onClick={fn}
                 style={{ fontSize: 11, fontFamily: "'Geist'", fontWeight: 500, padding: "5px 11px", borderRadius: 6, cursor: "pointer", border: `1px solid ${color}22`, color, background: "transparent", whiteSpace: "nowrap" }}
@@ -122,8 +122,8 @@ function DomainGroupRow({ group, onBlockAll, onDeleteAll }: {
           <td style={{ padding: "10px 16px" }}>
             <div style={{ display: "flex", gap: 5, justifyContent: "flex-end" }}>
               {[
-                { label: "Bloquear", color: "#f59e0b", fn: () => onBlockAll([addr.email])  },
-                { label: "Limpar",   color: "#6b6b80", fn: () => onDeleteAll([addr.email]) },
+                { label: "Bloquear", color: "#f59e0b", fn: () => void onBlockAll([addr.email])  },
+                { label: "Limpar",   color: "#6b6b80", fn: () => void onDeleteAll([addr.email]) },
               ].map(({ label, color, fn }) => (
                 <button key={label} onClick={(e) => { e.stopPropagation(); fn(); }}
                   style={{ fontSize: 11, fontFamily: "'Geist'", fontWeight: 500, padding: "4px 10px", borderRadius: 6, cursor: "pointer", border: `1px solid ${color}22`, color, background: "transparent", whiteSpace: "nowrap" }}
@@ -213,17 +213,59 @@ export default function SendersTable({
     if (!confirmClean) { setConfirmClean(true); return; }
     setAutoCleaning(true);
     try {
-      await autoClean(toxicEmails);
+      const res = await autoClean(toxicEmails);
+      const wasDryRun = res.data.results.some((r) => r.dry_run);
+      if (wasDryRun) {
+        const total = res.data.results.reduce((sum, r) => sum + (r.deleted ?? 0), 0);
+        addToast(`Simulacao: ${total} emails seriam removidos`, "info");
+        return;
+      }
       const next: Record<string, string[]> = {};
       toxicEmails.forEach((e) => (next[e] = ["both"]));
       setCompletedActions((prev) => ({ ...prev, ...next }));
       setSessionBlocked((n) => n + toxicEmails.length);
+      setSessionDeleted((n) => n + res.data.results.reduce((sum, r) => sum + (r.deleted ?? 0), 0));
       addToast(`Limpeza automática: ${toxicEmails.length} remetentes processados`);
     } catch (e: any) {
       addToast(e?.response?.data?.detail ?? "Erro na limpeza automática.", "error");
     } finally {
       setAutoCleaning(false);
       setConfirmClean(false);
+    }
+  };
+
+  const handleBlockMany = async (emails: string[]) => {
+    if (emails.length > 1 && !window.confirm(`Bloquear ${emails.length} enderecos deste dominio?`)) return;
+    try {
+      const results = await Promise.all(emails.map((email) => blockSender(email)));
+      const realResults = results.filter((r) => !r.data.dry_run);
+      realResults.forEach((r) => handleAction(r.data.email, "block"));
+      addToast(
+        realResults.length === 0
+          ? `Simulacao: ${emails.length} bloqueios seriam criados`
+          : `${realResults.length} remetente(s) bloqueado(s)`,
+        realResults.length === 0 ? "info" : "success"
+      );
+    } catch (e: any) {
+      addToast(e?.response?.data?.detail ?? "Erro ao bloquear grupo.", "error");
+    }
+  };
+
+  const handleDeleteMany = async (emails: string[]) => {
+    if (!window.confirm(`Limpar historico de ${emails.length} endereco(s)?`)) return;
+    try {
+      const results = await Promise.all(emails.map((email) => deleteSender(email)));
+      const realResults = results.filter((r) => !r.data.dry_run);
+      realResults.forEach((r) => handleAction(r.data.email, "delete", r.data.deleted));
+      const deleted = results.reduce((sum, r) => sum + (r.data.deleted ?? 0), 0);
+      addToast(
+        realResults.length === 0
+          ? `Simulacao: ${deleted} emails seriam removidos`
+          : `${deleted} emails removidos`,
+        realResults.length === 0 ? "info" : "success"
+      );
+    } catch (e: any) {
+      addToast(e?.response?.data?.detail ?? "Erro ao limpar grupo.", "error");
     }
   };
 
@@ -362,8 +404,8 @@ export default function SendersTable({
                     <DomainGroupRow
                       key={g.rootDomain}
                       group={g}
-                      onBlockAll={(emails) => emails.forEach((e) => handleAction(e, "block"))}
-                      onDeleteAll={(emails) => emails.forEach((e) => handleAction(e, "delete"))}
+                      onBlockAll={handleBlockMany}
+                      onDeleteAll={handleDeleteMany}
                     />
                   ))
                 : filtered.map((s) => (

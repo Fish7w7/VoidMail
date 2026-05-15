@@ -5,15 +5,16 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from config import BASE_DIR, settings
 
 SCOPES = [
     "https://mail.google.com/",
     "https://www.googleapis.com/auth/gmail.settings.basic",
 ]
 
-TOKEN_JSON       = Path("token.json")
-TOKEN_PICKLE     = Path("token.pickle")
-CREDENTIALS_PATH = Path("credentials.json")
+TOKEN_JSON       = BASE_DIR / "token.json"
+TOKEN_PICKLE     = BASE_DIR / "token.pickle"
+CREDENTIALS_PATH = BASE_DIR / "credentials.json"
 
 
 def _migrate_pickle_to_json():
@@ -56,6 +57,13 @@ class GmailClient:
             self.creds = None
             return False
 
+        if self.creds and self.creds.expired and self.creds.refresh_token:
+            try:
+                self.refresh_if_needed()
+            except Exception:
+                self.creds = None
+                return False
+
         return self.creds is not None and self.creds.valid
 
     def refresh_if_needed(self):
@@ -67,13 +75,13 @@ class GmailClient:
         if not CREDENTIALS_PATH.exists():
             raise FileNotFoundError("credentials.json not found")
         flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
-        flow.redirect_uri = "http://localhost:8000/auth/callback"
+        flow.redirect_uri = settings.oauth_redirect_uri
         auth_url, _ = flow.authorization_url(prompt="consent", access_type="offline")
         return auth_url
 
     def exchange_code(self, code: str):
         flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_PATH), SCOPES)
-        flow.redirect_uri = "http://localhost:8000/auth/callback"
+        flow.redirect_uri = settings.oauth_redirect_uri
         flow.fetch_token(code=code)
         self.creds = flow.credentials
         self._save_creds()

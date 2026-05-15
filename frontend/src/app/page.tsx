@@ -6,7 +6,7 @@ import LoginScreen from "@/components/LoginScreen";
 import SkeletonDashboard from "@/components/SkeletonDashboard";
 import HealthScore from "@/components/HealthScore";
 import TopSendersChart from "@/components/TopSendersChart";
-import TimelineChart from "@/components/Timelinechart.";
+import TimelineChart from "@/components/TimelineChart";
 import SendersTable from "@/components/SendersTable";
 
 type View = "checking" | "login" | "loading" | "dashboard" | "error";
@@ -164,19 +164,20 @@ function Dashboard() {
       );
       const data = r.data;
 
-      setAllSenders((prev) => mergeSenders(prev, data.senders));
+      setAllSenders((prev) => {
+        const merged = mergeSenders(prev, data.senders);
+        setStats((prevStats) => prevStats ? {
+          ...prevStats,
+          unique_senders: merged.length,
+        } : prevStats);
+        return merged;
+      });
       setTotalLoaded((n) => n + data.total_emails);
       setNextToken(data.next_page_token ?? null);
       setHasMore(data.has_more ?? false);
 
       // Atualiza health score e unique_senders se o backend retornou
       if (data.health_score !== null) setHealthScore(data.health_score);
-      if (stats) {
-        setStats((prev) => prev ? {
-          ...prev,
-          unique_senders: data.unique_senders + prev.unique_senders,
-        } : prev);
-      }
 
       addToast(`+${data.total_emails} emails carregados`, "info");
     } catch (e: any) {

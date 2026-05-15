@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import RedirectResponse
 from gmail_client import gmail_client
+from config import settings
 
 router = APIRouter()
 
@@ -27,7 +28,7 @@ async def login():
 async def callback(code: str):
     try:
         gmail_client.exchange_code(code)
-        return RedirectResponse("http://localhost:3000?auth=success")
+        return RedirectResponse(f"{settings.frontend_url}?auth=success")
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
